@@ -377,14 +377,18 @@ func (hm *HookManager) applyBeforeLLMControls(
 	if next == nil || current == nil {
 		return next
 	}
-	if llmHookSystemMessagesUnchanged(current.Messages, next.Messages) {
-		return next
+	if !llmHookSystemMessagesUnchanged(current.Messages, next.Messages) {
+		logger.WarnCF("hooks", "Hook attempted to modify system prompt; preserving original messages", map[string]any{
+			"hook": hookName,
+		})
+		next.Messages = cloneProviderMessages(current.Messages)
 	}
-
-	logger.WarnCF("hooks", "Hook attempted to modify system prompt; preserving original messages", map[string]any{
-		"hook": hookName,
-	})
-	next.Messages = cloneProviderMessages(current.Messages)
+	if !llmHookToolDefinitionsUnchanged(current.Tools, next.Tools) {
+		logger.WarnCF("hooks", "Hook attempted to modify tool definitions; preserving original tools", map[string]any{
+			"hook": hookName,
+		})
+		next.Tools = cloneToolDefinitions(current.Tools)
+	}
 	return next
 }
 
@@ -411,6 +415,10 @@ func systemMessageFingerprints(messages []providers.Message) []systemMessageFing
 		})
 	}
 	return fingerprints
+}
+
+func llmHookToolDefinitionsUnchanged(before, after []providers.ToolDefinition) bool {
+	return reflect.DeepEqual(cloneToolDefinitions(before), cloneToolDefinitions(after))
 }
 
 func (hm *HookManager) BeforeTool(

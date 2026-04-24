@@ -164,6 +164,62 @@ func TestBuildMessagesFromPrompt_AttachesInternalPromptMetadata(t *testing.T) {
 	}
 }
 
+func TestContextBuilder_CollectsToolDiscoveryContributor(t *testing.T) {
+	t.Setenv("PICOCLAW_BUILTIN_SKILLS", t.TempDir())
+	cb := NewContextBuilder(t.TempDir()).WithToolDiscovery(true, false)
+
+	messages := cb.BuildMessagesFromPrompt(PromptBuildRequest{CurrentMessage: "hello"})
+	system := messages[0]
+	if !strings.Contains(system.Content, "tool_search_tool_bm25") {
+		t.Fatalf("system prompt missing tool discovery rule: %q", system.Content)
+	}
+
+	var found bool
+	for _, part := range system.SystemParts {
+		if part.PromptSource == string(PromptSourceToolDiscovery) {
+			found = true
+			if part.PromptLayer != string(PromptLayerCapability) || part.PromptSlot != string(PromptSlotTooling) {
+				t.Fatalf("tool discovery metadata = %#v, want capability/tooling", part)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("system parts missing tool discovery prompt metadata")
+	}
+}
+
+func TestContextBuilder_CollectsMCPServerContributor(t *testing.T) {
+	t.Setenv("PICOCLAW_BUILTIN_SKILLS", t.TempDir())
+	cb := NewContextBuilder(t.TempDir())
+	err := cb.RegisterPromptContributor(mcpServerPromptContributor{
+		serverName: "GitHub Server",
+		toolCount:  3,
+		deferred:   true,
+	})
+	if err != nil {
+		t.Fatalf("RegisterPromptContributor() error = %v", err)
+	}
+
+	messages := cb.BuildMessagesFromPrompt(PromptBuildRequest{CurrentMessage: "hello"})
+	system := messages[0]
+	if !strings.Contains(system.Content, "MCP server `GitHub Server` is connected") {
+		t.Fatalf("system prompt missing MCP contributor content: %q", system.Content)
+	}
+
+	var found bool
+	for _, part := range system.SystemParts {
+		if part.PromptSource == "mcp:github_server" {
+			found = true
+			if part.PromptLayer != string(PromptLayerCapability) || part.PromptSlot != string(PromptSlotMCP) {
+				t.Fatalf("mcp metadata = %#v, want capability/mcp", part)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("system parts missing MCP prompt metadata")
+	}
+}
+
 type testPromptContributor struct {
 	desc PromptSourceDescriptor
 	part PromptPart

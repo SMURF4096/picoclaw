@@ -186,6 +186,36 @@ func (h *llmUserAppendHook) AfterLLM(
 	return resp.Clone(), HookDecision{Action: HookActionContinue}, nil
 }
 
+type llmToolRewriteHook struct{}
+
+func (h *llmToolRewriteHook) BeforeLLM(
+	ctx context.Context,
+	req *LLMHookRequest,
+) (*LLMHookRequest, HookDecision, error) {
+	next := req.Clone()
+	next.Model = "changed-model"
+	next.Tools[0].Function.Description = "rewritten tool"
+	next.Tools = append(next.Tools, providers.ToolDefinition{
+		Type: "function",
+		Function: providers.ToolFunctionDefinition{
+			Name:        "hook_tool",
+			Description: "hook tool",
+			Parameters:  map[string]any{"type": "object"},
+		},
+		PromptLayer:  string(PromptLayerCapability),
+		PromptSlot:   string(PromptSlotTooling),
+		PromptSource: "hook:test",
+	})
+	return next, HookDecision{Action: HookActionModify}, nil
+}
+
+func (h *llmToolRewriteHook) AfterLLM(
+	ctx context.Context,
+	resp *LLMHookResponse,
+) (*LLMHookResponse, HookDecision, error) {
+	return resp.Clone(), HookDecision{Action: HookActionContinue}, nil
+}
+
 func TestHookManager_BeforeLLMControlsSystemPromptMutation(t *testing.T) {
 	hm := NewHookManager(nil)
 	if err := hm.Mount(NamedHook("rewrite-system", &llmSystemRewriteHook{})); err != nil {
@@ -241,6 +271,51 @@ func TestHookManager_BeforeLLMAllowsNonSystemMessageMutation(t *testing.T) {
 	}
 	if got.Messages[2].Role != "user" || got.Messages[2].Content != "extra user context" {
 		t.Fatalf("appended message = %#v, want extra user context", got.Messages[2])
+	}
+}
+
+func TestHookManager_BeforeLLMControlsToolDefinitionMutation(t *testing.T) {
+	hm := NewHookManager(nil)
+	if err := hm.Mount(NamedHook("rewrite-tool", &llmToolRewriteHook{})); err != nil {
+		t.Fatalf("Mount() error = %v", err)
+	}
+
+	req := &LLMHookRequest{
+		Model: "original-model",
+		Messages: []providers.Message{
+			{Role: "system", Content: "system"},
+			{Role: "user", Content: "hello"},
+		},
+		Tools: []providers.ToolDefinition{
+			{
+				Type: "function",
+				Function: providers.ToolFunctionDefinition{
+					Name:        "mcp_github_create_issue",
+					Description: "create issue",
+					Parameters:  map[string]any{"type": "object"},
+				},
+				PromptLayer:  string(PromptLayerCapability),
+				PromptSlot:   string(PromptSlotMCP),
+				PromptSource: "mcp:github",
+			},
+		},
+	}
+
+	got, decision := hm.BeforeLLM(context.Background(), req)
+	if decision.normalizedAction() != HookActionContinue {
+		t.Fatalf("decision = %v, want continue", decision)
+	}
+	if got.Model != "changed-model" {
+		t.Fatalf("model = %q, want changed-model", got.Model)
+	}
+	if len(got.Tools) != 1 {
+		t.Fatalf("tools len = %d, want original 1", len(got.Tools))
+	}
+	if got.Tools[0].Function.Description != "create issue" {
+		t.Fatalf("tool description = %q, want original", got.Tools[0].Function.Description)
+	}
+	if got.Tools[0].PromptSource != "mcp:github" || got.Tools[0].PromptSlot != string(PromptSlotMCP) {
+		t.Fatalf("tool prompt metadata = %#v, want original mcp metadata", got.Tools[0])
 	}
 }
 

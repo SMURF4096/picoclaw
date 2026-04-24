@@ -22,13 +22,11 @@ import (
 )
 
 type ContextBuilder struct {
-	workspace          string
-	skillsLoader       *skills.SkillsLoader
-	memory             *MemoryStore
-	toolDiscoveryBM25  bool
-	toolDiscoveryRegex bool
-	splitOnMarker      bool
-	promptRegistry     *PromptRegistry
+	workspace      string
+	skillsLoader   *skills.SkillsLoader
+	memory         *MemoryStore
+	splitOnMarker  bool
+	promptRegistry *PromptRegistry
 
 	// Cache for system prompt to avoid rebuilding on every call.
 	// This fixes issue #607: repeated reprocessing of the entire context.
@@ -50,8 +48,16 @@ type ContextBuilder struct {
 }
 
 func (cb *ContextBuilder) WithToolDiscovery(useBM25, useRegex bool) *ContextBuilder {
-	cb.toolDiscoveryBM25 = useBM25
-	cb.toolDiscoveryRegex = useRegex
+	if useBM25 || useRegex {
+		if err := cb.RegisterPromptContributor(toolDiscoveryPromptContributor{
+			useBM25:  useBM25,
+			useRegex: useRegex,
+		}); err != nil {
+			logger.WarnCF("agent", "Failed to register tool discovery prompt contributor", map[string]any{
+				"error": err.Error(),
+			})
+		}
+	}
 	return cb
 }
 
@@ -83,11 +89,19 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 }
 
 func (cb *ContextBuilder) RegisterPromptSource(desc PromptSourceDescriptor) error {
-	return cb.promptRegistryOrDefault().RegisterSource(desc)
+	err := cb.promptRegistryOrDefault().RegisterSource(desc)
+	if err == nil {
+		cb.InvalidateCache()
+	}
+	return err
 }
 
 func (cb *ContextBuilder) RegisterPromptContributor(contributor PromptContributor) error {
-	return cb.promptRegistryOrDefault().RegisterContributor(contributor)
+	err := cb.promptRegistryOrDefault().RegisterContributor(contributor)
+	if err == nil {
+		cb.InvalidateCache()
+	}
+	return err
 }
 
 func (cb *ContextBuilder) promptRegistryOrDefault() *PromptRegistry {
@@ -124,16 +138,16 @@ Your workspace is at: %s
 		version, workspacePath, workspacePath, workspacePath, workspacePath, workspacePath)
 }
 
-func (cb *ContextBuilder) getDiscoveryRule() string {
-	if !cb.toolDiscoveryBM25 && !cb.toolDiscoveryRegex {
+func formatToolDiscoveryRule(useBM25, useRegex bool) string {
+	if !useBM25 && !useRegex {
 		return ""
 	}
 
 	var toolNames []string
-	if cb.toolDiscoveryBM25 {
+	if useBM25 {
 		toolNames = append(toolNames, `"tool_search_tool_bm25"`)
 	}
-	if cb.toolDiscoveryRegex {
+	if useRegex {
 		toolNames = append(toolNames, `"tool_search_tool_regex"`)
 	}
 
@@ -172,19 +186,6 @@ func (cb *ContextBuilder) BuildSystemPromptParts() []PromptPart {
 		Stable:  true,
 		Cache:   PromptCacheEphemeral,
 	})
-
-	if toolDiscovery := cb.getDiscoveryRule(); toolDiscovery != "" {
-		add(PromptPart{
-			ID:      "capability.tool_discovery",
-			Layer:   PromptLayerCapability,
-			Slot:    PromptSlotTooling,
-			Source:  PromptSource{ID: PromptSourceToolDiscovery, Name: "tool_registry:discovery"},
-			Title:   "tool discovery",
-			Content: toolDiscovery,
-			Stable:  true,
-			Cache:   PromptCacheEphemeral,
-		})
-	}
 
 	// Bootstrap files
 	bootstrapContent := cb.LoadBootstrapFiles()
@@ -316,6 +317,19 @@ func (cb *ContextBuilder) EstimateSystemTokens(summary string, activeSkills []st
 	if skillsText := cb.buildActiveSkillsContext(activeSkills); skillsText != "" {
 		totalChars += utf8.RuneCountInString(skillsText)
 		totalChars += 7 // separator \n\n---\n\n
+	}
+
+	if contributedParts, err := cb.promptRegistryOrDefault().Collect(context.Background(), PromptBuildRequest{
+		Summary:      summary,
+		ActiveSkills: append([]string(nil), activeSkills...),
+	}); err == nil {
+		for _, part := range contributedParts {
+			if strings.TrimSpace(part.Content) == "" {
+				continue
+			}
+			totalChars += utf8.RuneCountInString(part.Content)
+			totalChars += 7 // separator
+		}
 	}
 
 	if summary != "" {

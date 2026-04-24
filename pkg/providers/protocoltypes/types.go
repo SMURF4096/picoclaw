@@ -98,6 +98,13 @@ type Message struct {
 type ToolDefinition struct {
 	Type     string                 `json:"type"`
 	Function ToolFunctionDefinition `json:"function"`
+
+	// Prompt metadata is internal to the agent runtime. Tool definitions are
+	// model-visible capability prompts even though providers send them outside
+	// the system message.
+	PromptLayer  string `json:"-"`
+	PromptSlot   string `json:"-"`
+	PromptSource string `json:"-"`
 }
 
 type ToolFunctionDefinition struct {

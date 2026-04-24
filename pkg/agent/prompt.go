@@ -52,6 +52,7 @@ const (
 	PromptSourceMemory         PromptSourceID = "memory:workspace"
 	PromptSourceSkillCatalog   PromptSourceID = "skill:index"
 	PromptSourceActiveSkills   PromptSourceID = "skill:active"
+	PromptSourceToolRegistry   PromptSourceID = "tool_registry:native"
 	PromptSourceToolDiscovery  PromptSourceID = "tool_registry:discovery"
 	PromptSourceOutputPolicy   PromptSourceID = "runtime.output"
 	PromptSourceSubTurnProfile PromptSourceID = "subturn.profile"
@@ -174,6 +175,13 @@ func builtinPromptSources() []PromptSourceDescriptor {
 			StableByDefault: true,
 		},
 		{
+			ID:              PromptSourceToolRegistry,
+			Owner:           "tools",
+			Description:     "Native provider tool definitions",
+			Allowed:         []PromptPlacement{{Layer: PromptLayerCapability, Slot: PromptSlotTooling}},
+			StableByDefault: true,
+		},
+		{
 			ID:              PromptSourceSkillCatalog,
 			Owner:           "skills",
 			Description:     "Installed skill catalog",
@@ -278,12 +286,17 @@ func (r *PromptRegistry) RegisterContributor(contributor PromptContributor) erro
 	if contributor == nil {
 		return fmt.Errorf("prompt contributor is nil")
 	}
-	if err := r.RegisterSource(contributor.PromptSource()); err != nil {
+	desc := contributor.PromptSource()
+	desc.ID = PromptSourceID(strings.TrimSpace(string(desc.ID)))
+	if err := r.RegisterSource(desc); err != nil {
 		return err
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.contributors = slices.DeleteFunc(r.contributors, func(existing PromptContributor) bool {
+		return PromptSourceID(strings.TrimSpace(string(existing.PromptSource().ID))) == desc.ID
+	})
 	r.contributors = append(r.contributors, contributor)
 	return nil
 }
