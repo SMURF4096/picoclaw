@@ -404,7 +404,13 @@ func TestCodexProvider_ChatRoundTrip_OutputTextDeltaFallback(t *testing.T) {
 	provider := NewCodexProvider("test-token", "acc-123")
 	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
 
-	resp, err := provider.Chat(t.Context(), []Message{{Role: "user", Content: "Hello"}}, nil, "gpt-4o", map[string]any{})
+	resp, err := provider.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "Hello"}},
+		nil,
+		"gpt-4o",
+		map[string]any{},
+	)
 	if err != nil {
 		t.Fatalf("Chat() error: %v", err)
 	}
