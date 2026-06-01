@@ -85,6 +85,8 @@ Use 'command' to execute shell commands directly.`
 }
 
 // Parameters returns the tool parameters schema
+//
+//nolint:dupl // Tool parameter schemas intentionally use similar JSON-schema map literals.
 func (t *CronTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -317,16 +319,20 @@ func (t *CronTool) updateJob(ctx context.Context, args map[string]any) *ToolResu
 
 	patches := 0
 
-	if name, present, errResult := optionalNonEmptyString(args, "name"); errResult != nil {
-		return errResult
-	} else if present {
+	name, namePresent, nameErr := optionalNonEmptyString(args, "name")
+	if nameErr != nil {
+		return nameErr
+	}
+	if namePresent {
 		job.Name = name
 		patches++
 	}
 
-	if message, present, errResult := optionalNonEmptyString(args, "message"); errResult != nil {
-		return errResult
-	} else if present {
+	message, messagePresent, messageErr := optionalNonEmptyString(args, "message")
+	if messageErr != nil {
+		return messageErr
+	}
+	if messagePresent {
 		job.Payload.Message = message
 		patches++
 	}
