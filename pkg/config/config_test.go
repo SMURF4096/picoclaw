@@ -1728,6 +1728,65 @@ func TestDefaultConfig_SessionDimensions(t *testing.T) {
 	}
 }
 
+func TestSessionConfig_ApplyDmScope(t *testing.T) {
+	tests := []struct {
+		name       string
+		dmScope    string
+		dimensions []string
+		want       []string
+	}{
+		{
+			name:    "per-channel-peer",
+			dmScope: "per-channel-peer",
+			want:    []string{"chat", "sender"},
+		},
+		{
+			name:    "per-channel",
+			dmScope: "per-channel",
+			want:    []string{"chat"},
+		},
+		{
+			name:    "per-peer",
+			dmScope: "per-peer",
+			want:    []string{"sender"},
+		},
+		{
+			name:    "global",
+			dmScope: "global",
+			want:    nil,
+		},
+		{
+			name:       "explicit dimensions take precedence",
+			dmScope:    "per-channel-peer",
+			dimensions: []string{"sender"},
+			want:       []string{"sender"},
+		},
+		{
+			name:    "empty dm_scope is no-op",
+			dmScope: "",
+			want:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SessionConfig{
+				DmScope:    tt.dmScope,
+				Dimensions: tt.dimensions,
+			}
+			s.ApplyDmScope()
+			if len(s.Dimensions) != len(tt.want) {
+				t.Fatalf("Dimensions = %v, want %v", s.Dimensions, tt.want)
+			}
+			for i, v := range tt.want {
+				if s.Dimensions[i] != v {
+					t.Errorf("Dimensions[%d] = %q, want %q", i, s.Dimensions[i], v)
+				}
+			}
+		})
+	}
+}
+
 func TestDefaultConfig_WorkspacePath_Default(t *testing.T) {
 	t.Setenv("PICOCLAW_HOME", "")
 

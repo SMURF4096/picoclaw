@@ -352,6 +352,26 @@ type SessionConfig struct {
 	DmScope       string              `json:"dm_scope,omitempty"`
 }
 
+// ApplyDmScope translates the user-facing dm_scope value into the internal
+// dimensions array that the routing layer consumes. It is a no-op when
+// DmScope is empty or when Dimensions is already set (explicit Dimensions
+// take precedence over the derived value).
+func (s *SessionConfig) ApplyDmScope() {
+	if s.DmScope == "" || len(s.Dimensions) > 0 {
+		return
+	}
+	switch s.DmScope {
+	case "per-channel-peer":
+		s.Dimensions = []string{"chat", "sender"}
+	case "per-channel":
+		s.Dimensions = []string{"chat"}
+	case "per-peer":
+		s.Dimensions = []string{"sender"}
+	case "global":
+		s.Dimensions = nil
+	}
+}
+
 // RoutingConfig controls the intelligent model routing feature.
 // When enabled, each incoming message is scored against structural features
 // (message length, code blocks, tool call history, conversation depth, attachments).
@@ -1476,6 +1496,8 @@ func LoadConfig(path string) (*Config, error) {
 		homePath := GetHome()
 		cfg.Agents.Defaults.Workspace = filepath.Join(homePath, pkg.WorkspaceName)
 	}
+
+	cfg.Session.ApplyDmScope()
 
 	return cfg, nil
 }
